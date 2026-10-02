@@ -69,7 +69,8 @@ fate by `…/status`; its metadata by `…/headers`.
 
 ## Requirements
 
-- GNU/Hurd with `libnetfs` and `libihash` (the translator itself)
+- GNU/Hurd with `libnetfs` and `libihash` (on Debian GNU/Hurd the
+  single package `hurd-dev` provides both, headers and libraries)
 - **libcurl >= 7.0.0** (HTTP transport)
 - A **C23 compiler** (GCC 13 or newer; the build system also accepts
   the older `-std=c2x` spelling)

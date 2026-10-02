@@ -2,7 +2,11 @@
 
 ## Prerequisites
 
-- GNU/Hurd (for the translator itself) with `libnetfs` and `libihash`
+- GNU/Hurd (for the translator itself).  On Debian GNU/Hurd, all the
+  Hurd headers and translator libraries (`hurd/netfs.h`,
+  `hurd/ihash.h`, `libnetfs`, `libihash`, ...) come from the single
+  `hurd-dev` package — there is no `libnetfs-dev` nor `libihash`
+  package.  The runtime libraries are pulled in as `hurd-libs0.3`.
 - **libcurl >= 7.0.0** (`libcurl4-openssl-dev` on Debian)
 - A **C23 compiler**: GCC 13 or newer (`-std=c23`), or a compiler
   accepting `-std=c2x`

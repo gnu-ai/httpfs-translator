@@ -1144,9 +1144,16 @@ error_t netfs_report_access (struct iouser *cred, struct node *np, int *types)
     return 0;
 }
 
+/* netfs_make_user — build a credential from the RPC's id arrays.
+   libiohelp's current API takes an out-parameter and raw arrays
+   (iohelp_create_complex_iouser), not idvecs built by the caller. */
 struct iouser *netfs_make_user (uid_t *uids, int nuids, uid_t *gids, int ngids)
 {
-    return iohelp_create_iouser (nullptr, nullptr, uids, nuids, gids, ngids);
+    struct iouser *user = nullptr;
+
+    if (iohelp_create_complex_iouser (&user, uids, nuids, gids, ngids) != 0)
+        return nullptr;
+    return user;
 }
 
 /* ------------------------------------------------------------------

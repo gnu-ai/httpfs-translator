@@ -13,4 +13,4 @@ httpfs_SOURCES = \
 AM_CPPFLAGS = -I$(top_srcdir) $(CURL_CFLAGS)
 AM_CFLAGS = $(C23_CFLAGS) -Wall -Wextra
 
-httpfs_LDADD = $(CURL_LIBS) -lnetfs -lihash -lpthread
+httpfs_LDADD = $(CURL_LIBS) -lnetfs -lihash -liohelp -lmachuser -lpthread

@@ -1,5 +1,9 @@
 # Building and installing httpfs
 
+Validated end to end on Debian GNU/Hurd (hurd-amd64):
+build, 4/4 tests, and mounting through `settrans` against live
+servers.
+
 ## Prerequisites
 
 - GNU/Hurd (for the translator itself).  On Debian GNU/Hurd, all the
@@ -12,6 +16,12 @@
   accepting `-std=c2x`
 - `autoconf`, `automake`, `pkg-config` (to regenerate the build
   system via `autogen.sh`)
+
+The translator links, explicitly, against `libnetfs`, `libihash` and
+`libiohelp` (all from `hurd-dev`) and `libmachuser` (from
+`libc0.3-dev`, pulled in by `build-essential`): on Debian GNU/Hurd
+every Hurd library is a separate shared object and the linker does
+not search the dependencies of the libraries you name.
 - *Optional*: `libmicrohttpd` (`libmicrohttpd-dev`) — only
   needed for `make check`; without it the two network tests are
   skipped and a warning is printed. Both the classic 0.9.x API and
@@ -86,3 +96,4 @@ $ make check
 | `configure: WARNING: libmicrohttpd not found` | harmless: the network tests will be skipped |
 | reads block for ~60 s then `ETIMEDOUT` | the remote host is unreachable; check the URL scheme and DNS |
 | `cat /web/status` prints `404` | the transport worked; the remote path does not exist — this is the designed way to expose missing resources |
+| `settrans: httpfs: No such file or directory` | the translator is not installed: run `make install`, or give `settrans` the full path to `src/httpfs` |

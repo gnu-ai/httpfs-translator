@@ -309,8 +309,11 @@ Determinism first (see `CONTEXT.md`):
 
 Integration outside the Hurd is exercised by driving the netfs
 callbacks directly against a real HTTP server (the verification
-harness used during development); on the Hurd, end-to-end behavior is
-additionally covered by `settrans` + ordinary tools.
+harness used during development).  On the Hurd itself, the full
+build and the 4-test suite pass on Debian GNU/Hurd (hurd-amd64) with
+the real libnetfs/libihash/libiohelp, and end-to-end behavior is
+verified through `settrans` + ordinary tools (stat, dd, tail, sha256)
+against both range-capable and Range-ignoring servers.
 
 ## 11. Known limitations (v0.3)
 

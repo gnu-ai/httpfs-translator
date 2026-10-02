@@ -247,6 +247,12 @@ transport layer (src/http.c) → libcurl → remote HTTP server
 
 ## Status and roadmap
 
+**Validated on real GNU/Hurd**: the translator builds and its whole
+test suite passes on Debian GNU/Hurd (hurd-amd64, trixie/sid) with
+the real `libnetfs`/`libihash`/`libiohelp`, and mounting through
+`settrans` was verified against live web servers (both range-capable
+and Range-ignoring).
+
 Implemented and working (Phase 2 complete):
 - URL tree navigation with percent-encoding
 - `content` / `headers` / `status` views at every level
@@ -261,9 +267,9 @@ Implemented and working (Phase 2 complete):
 
 Planned (see `PLAN.md`):
 - Phase 3: stacked content translators (`htmlfs`, `jsonfs`, ...)
-- Phase 4: hardening, libmicrohttpd v2 fault injection, CI on
-  Debian GNU/Hurd under QEMU (validation of the real libnetfs RPC
-  behavior under `settrans`)
+- Phase 4: hardening, libmicrohttpd v2 fault injection, and a CI
+  workflow running the build + test suite on Debian GNU/Hurd under
+  QEMU at every commit
 
 ## License
 

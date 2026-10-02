@@ -1,22 +1,27 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * SPDX-FileCopyrightText: 2026 Claire Ivanenka <claire@gnu-ai.org> */
+
 /*
-    https - A simple HTTP filesystem server for GNU Hurd.
-    Copyright (C) 2026 Gianluca Cannata <gcannata23@gmail.com>
+ * httpfs.c — Entry point of the httpfs translator for GNU/Hurd.
+ *
+ * USAGE
+ * -----
+ *      settrans -a /web httpfs https://example.org
+ *
+ * The first non-option argument is the base URL of the "browser";
+ * the tree is then explored as described in httpfs.h:
+ *
+ *      cat /web/content              body of https://example.org
+ *      cat /web/docs/x.html/content  body of https://example.org/docs/x.html
+ *      cat /web/status               HTTP status code of the root
+ *
+ * The software agent (LLM) of the GNU AI project can therefore
+ * browse the Web by simply reading files.
+ */
 
-    This program is free software: you can redistribute it and/or modify
-    it under the terms of the GNU General Public License as published by
-    the Free Software Foundation, either version 3 of the License, or
-    (at your option) any later version.
-
-    This program is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU General Public License for more details.
-
-    You should have received a copy of the GNU General Public License
-    along with this program.  If not, see <https://www.gnu.org/licenses/>.
-*/
-
-#define _GNU_SOURCE
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
 
 #include <error.h>
 #include <errno.h>
@@ -26,88 +31,71 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <hurd.h>
+
 #include "httpfs.h"
 #include <hurd/netfs.h>
 
+/* Variables required by libnetfs (defined by the translator). */
 char *netfs_server_name = "httpfs";
-char *netfs_server_version = "0.1.0";
+char *netfs_server_version = "0.2.0";
+int netfs_maxsymlinks = 8;
 
-/* The root node of the filesystem. */
-struct node *netfs_root_node = NULL;
-
-/* Search for a file or directory in the filesystem. */
-error_t netfs_attempt_lookup(struct iouser *user, struct node *dir, const char *name, struct node **np)
+int main (int argc, char *argv[])
 {
-    return ENOENT;
-}
+    error_t err;
+    mach_port_t bootstrap;
+    struct netnode *nn_root;
+    const char *base_url = nullptr;
 
-/* Clean up a node when it has no more references. */
-void netfs_node_norefs(struct node *np)
-{
-    struct netnode *nn = netfs_node_netnode(np);
-    if (nn != NULL) {
-        free(nn);
-    }
+    /* --- Retrieve the base URL -----------------------------------
+       settrans hands its arguments to the translator; the first
+       argument that is not an option is our URL. */
+    for (int i = 1; i < argc; i++)
+        if (argv[i][0] != '-')
+        {
+            base_url = argv[i];
+            break;
+        }
 
-    netfs_drop_node(np);
-}
+    if (base_url == nullptr)
+        error (1, 0, "usage: settrans -a <mount point> httpfs <URL>");
 
-int main(void)
-{
-    mach_port_t bootstrap_port;
-    error_t err = 0;
+    /* --- Initialize libnetfs ------------------------------------ */
+    netfs_init ();
 
-    /* Initialize the netfs server */
-    netfs_init();
+    /* --- Create the root node: the base URL ---------------------- */
+    nn_root = malloc (sizeof (struct netnode));
+    if (nn_root == nullptr)
+        error (1, ENOMEM, "cannot create the root node.");
 
-    /* Create the root netnode */
-    struct netnode *nn_root = malloc(sizeof(struct netnode));
-    if (nn_root == NULL) {
-        error(1, ENOMEM, "Failed to create root netnode.");
-    }
-    err = httpfs_init(nn_root);
-    if (err != 0) {
-        free(nn_root);
-        error(1, err, "Failed to initialize root netnode.");
-    }
+    err = httpfs_init (nn_root, base_url);
+    if (err != 0)
+        error (1, err, "cannot initialize the root node.");
 
-    /* Initialize libcurl */
-    nn_root->curl_handle = curl_easy_init();
-    if (nn_root->curl_handle == NULL) {
-        error(1, ENOMEM, "Failed to initialize libcurl handle.");
-    }
+    netfs_root_node = netfs_make_node (nn_root);
+    if (netfs_root_node == nullptr)
+        error (1, ENOMEM, "cannot create the root node.");
+    nn_root->node = netfs_root_node;
 
-    curl_easy_setopt(nn_root->curl_handle, CURLOPT_URL, "http://example.com"); // Set the base URL for HTTP requests
-    CURLcode curl_res = curl_easy_perform(nn_root->curl_handle);
-    if (curl_res != CURLE_OK) {
-        error(1, curl_res, "Failed to perform HTTP request: %s", curl_easy_strerror(curl_res));
-    }
+    /* Minimal stat information for the root; netfs_validate_stat
+       recomputes it whenever necessary. */
+    memset (&netfs_root_node->nn_stat, 0, sizeof (netfs_root_node->nn_stat));
+    netfs_root_node->nn_stat.st_mode = S_IFDIR | 0555;
+    netfs_root_node->nn_stat.st_nlink = 1;
+    netfs_root_node->nn_translated = S_IFDIR | 0555;
 
-    /* Cleanup libcurl */
-    curl_easy_cleanup(nn_root->curl_handle);
+    /* --- Start the server ----------------------------------------
+       The bootstrap port connects the translator to the translated
+       node; it is provided by the parent process (settrans). */
+    task_get_bootstrap_port (mach_task_self (), &bootstrap);
+    if (bootstrap == MACH_PORT_NULL)
+        error (2, 0, "must be started as a translator (settrans).");
 
-    /* Create the root node */
-    netfs_root_node = netfs_make_node(nn_root);
-    if (netfs_root_node == NULL) {
-        error(1, ENOMEM, "Failed to create root node.");
-    }
+    netfs_startup (bootstrap, 0);
 
-    /* Start the netfs server */
-    task_get_bootstrap_port(mach_task_self(), &bootstrap_port);
-    netfs_startup(bootstrap_port, 0);
-
-    /* Enter the main server loop */
-    netfs_server_loop();
-
-    /* Shutdown the netfs server */
-    err = netfs_shutdown(0);
-    if (err != 0) {
-        error(1, err, "Error occurred shutting down netfs.");
-    }
-    err = httpfs_destroy(nn_root);
-    if (err != 0) {
-        error(1, err, "Error occurred shutting down httpfs.");
-    }
+    /* RPC service loop: never returns. */
+    netfs_server_loop ();
 
     return 0;
 }

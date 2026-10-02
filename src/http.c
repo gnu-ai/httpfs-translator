@@ -10,7 +10,9 @@
  * (htmlfs, jsonfs, ...), as described in CONTEXT.md.
  *
  * The code is written in C23 and uses only POSIX interfaces for
- * everything that is not libcurl.
+ * everything that is not libcurl.  The three request flavors
+ * (HEAD, full GET, ranged GET) share one implementation:
+ * http_get_impl selects the method and the optional Range header.
  */
 
 #ifdef HAVE_CONFIG_H
@@ -19,6 +21,7 @@
 
 #include "http.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,7 +39,15 @@ constexpr long HTTP_TOTAL_TIMEOUT_S   = 60;  /* whole transfer       */
 constexpr long HTTP_MAX_REDIRECTS     = 10;
 
 /* User-Agent string presented to servers. */
-constexpr char HTTP_USER_AGENT[] = "GNU-AI-httpfs/0.2 (Hurd translator)";
+constexpr char HTTP_USER_AGENT[] = "GNU-AI-httpfs/0.3 (Hurd translator)";
+
+/* The request flavors shared by the public functions. */
+enum http_mode
+{
+    HTTP_MODE_GET,      /* plain GET, no Range header                */
+    HTTP_MODE_HEAD,     /* HEAD: metadata only                        */
+    HTTP_MODE_RANGE,    /* GET with a "Range: bytes=start-end" header */
+};
 
 /* ------------------------------------------------------------------
  * Growable buffer — accumulator for received bytes
@@ -108,23 +119,110 @@ static size_t cb_headers (char *ptr, size_t size, size_t nmemb, void *opaque)
 }
 
 /* ------------------------------------------------------------------
- * Public functions
+ * Header parsing
  * ------------------------------------------------------------------ */
 
-void http_response_release (struct http_response *r)
+/* header_value — find the value of header NAME in the raw header
+   block (a C string of "Name: value" lines).  Comparison of the
+   field name is case-insensitive.  Returns the value with its
+   leading blanks skipped, or NULL when absent. */
+static const char *header_value (const char *headers, const char *name)
 {
-    if (r == nullptr)
-        return;
-    free (r->body);
-    free (r->headers);
-    r->body = nullptr;
-    r->headers = nullptr;
-    r->body_len = 0;
-    r->status = 0;
-    r->filetime = -1;
+    if (headers == nullptr)
+        return nullptr;
+
+    size_t name_len = strlen (name);
+    const char *line = headers;
+
+    while ((line = strstr (line, name)) != nullptr)
+    {
+        /* The occurrence must start a line and be followed by ":" */
+        if ((line == headers || line[-1] == '\n')
+            && strncasecmp (line, name, name_len) == 0)
+        {
+            const char *p = line + name_len;
+            while (*p == ' ' || *p == '\t')
+                p++;
+            if (*p == ':')
+            {
+                p++;
+                while (*p == ' ' || *p == '\t')
+                    p++;
+                return p;
+            }
+        }
+        line += name_len;
+    }
+    return nullptr;
 }
 
-int http_fetch (const char *url, struct http_response *out)
+/* parse_ll — parse a decimal long long, stopping at the first
+   character that is not a digit.  Returns true on success. */
+static bool parse_ll (const char *s, long long *out)
+{
+    if (s == nullptr)
+        return false;
+
+    long long v = 0;
+    while (*s >= '0' && *s <= '9')
+    {
+        v = v * 10 + (*s - '0');
+        s++;
+    }
+    *out = v;
+    return true;
+}
+
+/*
+ * size_total_of — best known size of the whole resource.
+ *
+ *   - the total of "Content-Range: bytes x-y/TOTAL" is
+ *     authoritative (it describes the whole document, not the
+ *     slice); "TOTAL" may be "*" (unknown);
+ *   - else the Content-Length of the response;
+ *   - else the length actually received;
+ *   - else -1.
+ */
+static long long size_total_of (const struct http_buf *headers,
+                                size_t body_len)
+{
+    /* The header buffer is one byte longer than headers->len because
+       http_get_impl appends the terminating NUL. */
+    const char *hdrs = headers->data != nullptr ? headers->data : "";
+    const char *cr = header_value (hdrs, "Content-Range");
+    long long v;
+
+    if (cr != nullptr)
+    {
+        /* "bytes start-last/TOTAL": jump to the slash. */
+        const char *slash = strchr (cr, '/');
+        if (slash != nullptr && slash[1] != '*' && parse_ll (slash + 1, &v)
+            && v >= 0)
+            return v;
+        return -1;
+    }
+
+    const char *cl = header_value (hdrs, "Content-Length");
+    if (cl != nullptr && parse_ll (cl, &v) && v >= 0)
+        return v;
+
+    return body_len > 0 ? (long long) body_len : -1;
+}
+
+/* ------------------------------------------------------------------
+ * Common request engine
+ * ------------------------------------------------------------------ */
+
+/*
+ * http_get_impl — perform one request of the given flavor.
+ *
+ * The out-of-range discipline is that of the public functions: a
+ * transport-level failure (DNS, timeout, connection refused) is an
+ * errno; an HTTP status, whatever it is, is a success.
+ */
+static int http_get_impl (enum http_mode mode, const char *url,
+                          size_t start, size_t end,
+                          struct http_response *out)
 {
     CURL *curl = nullptr;
     struct http_buf body = { nullptr, 0, 0 };
@@ -152,8 +250,8 @@ int http_fetch (const char *url, struct http_response *out)
     curl_easy_setopt (curl, CURLOPT_HEADERFUNCTION, cb_headers);
     curl_easy_setopt (curl, CURLOPT_HEADERDATA, &headers);
     curl_easy_setopt (curl, CURLOPT_USERAGENT, HTTP_USER_AGENT);
-    curl_easy_setopt (curl, CURLOPT_NOSIGNAL, 1L);       /* thread-safe   */
-    curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L); /* a browser    */
+    curl_easy_setopt (curl, CURLOPT_NOSIGNAL, 1L);        /* thread-safe  */
+    curl_easy_setopt (curl, CURLOPT_FOLLOWLOCATION, 1L);   /* a browser   */
     curl_easy_setopt (curl, CURLOPT_MAXREDIRS, HTTP_MAX_REDIRECTS);
     curl_easy_setopt (curl, CURLOPT_CONNECTTIMEOUT, HTTP_CONNECT_TIMEOUT_S);
     curl_easy_setopt (curl, CURLOPT_TIMEOUT, HTTP_TOTAL_TIMEOUT_S);
@@ -163,6 +261,22 @@ int http_fetch (const char *url, struct http_response *out)
     /* Accept transfer encodings; libcurl decodes them, so the body
        we keep is the decoded, raw payload. */
     curl_easy_setopt (curl, CURLOPT_ACCEPT_ENCODING, "gzip, deflate");
+
+    if (mode == HTTP_MODE_HEAD)
+        curl_easy_setopt (curl, CURLOPT_NOBODY, 1L);
+    else if (mode == HTTP_MODE_RANGE)
+    {
+        /* CURLOPT_RANGE takes "X-Y" WITHOUT the "bytes=" prefix:
+           libcurl adds "Range: bytes=X-Y" itself. */
+        char range[64];
+        if (snprintf (range, sizeof range, "%zu-%zu", start, end)
+            >= (int) sizeof range)
+        {
+            curl_easy_cleanup (curl);
+            return ERANGE;               /* window too large to express */
+        }
+        curl_easy_setopt (curl, CURLOPT_RANGE, range);
+    }
 
     /* --- Transfer ----------------------------------------------- */
     rc = curl_easy_perform (curl);
@@ -174,7 +288,8 @@ int http_fetch (const char *url, struct http_response *out)
         case CURLE_OUT_OF_MEMORY:       err = ENOMEM;      break;
         case CURLE_OPERATION_TIMEDOUT:  err = ETIMEDOUT;   break;
         case CURLE_COULDNT_RESOLVE_HOST:
-        case CURLE_COULDNT_CONNECT:    err = EHOSTUNREACH; break;
+        case CURLE_COULDNT_CONNECT:     err = EHOSTUNREACH; break;
+        case CURLE_RANGE_ERROR:         err = ERANGE;      break;
         default:                        err = EIO;         break;
         }
         goto leave;
@@ -185,8 +300,7 @@ int http_fetch (const char *url, struct http_response *out)
 
     /* A 4xx or 5xx status is NOT a transport error: the body (an
        error page, a JSON message...) remains exploitable by the
-       client.  httpfs therefore exposes the response as-is; the
-       "status" virtual file lets the visitor tell 200 from 404. */
+       client.  httpfs therefore exposes the response as-is. */
 
     /* --- Publish the result -------------------------------------- */
     /* The header block must become a valid C string. */
@@ -200,6 +314,7 @@ int http_fetch (const char *url, struct http_response *out)
     out->body_len = body.len;
     out->headers = headers.data;
     out->status = status;
+    out->size_total = size_total_of (&headers, body.len);
     out->filetime = filetime;
     body.data = nullptr;      /* ownership transferred to *out */
     headers.data = nullptr;
@@ -210,6 +325,40 @@ leave:
     free (body.data);
     free (headers.data);
     return err;
+}
+
+/* ------------------------------------------------------------------
+ * Public functions
+ * ------------------------------------------------------------------ */
+
+void http_response_release (struct http_response *r)
+{
+    if (r == nullptr)
+        return;
+    free (r->body);
+    free (r->headers);
+    r->body = nullptr;
+    r->headers = nullptr;
+    r->body_len = 0;
+    r->status = 0;
+    r->size_total = -1;
+    r->filetime = -1;
+}
+
+int http_head (const char *url, struct http_response *out)
+{
+    return http_get_impl (HTTP_MODE_HEAD, url, 0, 0, out);
+}
+
+int http_fetch (const char *url, struct http_response *out)
+{
+    return http_get_impl (HTTP_MODE_GET, url, 0, 0, out);
+}
+
+int http_fetch_range (const char *url, size_t start, size_t end,
+                      struct http_response *out)
+{
+    return http_get_impl (HTTP_MODE_RANGE, url, start, end, out);
 }
 
 /* ------------------------------------------------------------------

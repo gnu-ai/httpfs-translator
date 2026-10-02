@@ -21,9 +21,14 @@ extern unsigned char test_body[TEST_BODY_SIZE];
 
 struct test_server;
 
-/* Start an HTTP server on 127.0.0.1:PORT serving test_body.
-   Returns 0 on success, non-zero on failure. */
+/* Start an HTTP server on 127.0.0.1:PORT serving test_body, with
+   single-range support (206/416).  Returns 0 on success. */
 int test_server_start(unsigned short port, struct test_server **serverp);
+
+/* Same, but the server IGNORES the Range header: every request is
+   answered with 200 and the whole body — the fallback path the
+   httpfs content engine must detect (full-body mode). */
+int test_server_start_plain(unsigned short port, struct test_server **serverp);
 
 /* Stop a server started with test_server_start(). */
 void test_server_stop(struct test_server *server);

@@ -69,7 +69,9 @@ static mhd_result_t answer_cb(void *cls, struct MHD_Connection *conn,
     (void) upload_data_size;
     (void) con_cls;
 
-    if (strcmp(method, "GET") != 0)
+    /* HEAD is honored: it is the metadata probe used by httpfs
+       (Phase 2); MHD suppresses the body by itself. */
+    if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0)
         return MHD_NO;
 
     range = MHD_lookup_connection_value(conn, MHD_HEADER_KIND, "Range");
@@ -136,7 +138,40 @@ static mhd_result_t answer_cb(void *cls, struct MHD_Connection *conn,
     return MHD_YES;
 }
 
-int test_server_start(unsigned short port, struct test_server **serverp)
+/* Plain mode: always 200 + the whole body; the Range header is
+   ignored.  This is the fallback path that the httpfs content
+   engine must detect (full-body mode). */
+static mhd_result_t answer_plain_cb(void *cls, struct MHD_Connection *conn,
+                                   const char *url, const char *method,
+                                   const char *version,
+                                   const char *upload_data,
+                                   size_t *upload_data_size, void **con_cls)
+{
+    struct MHD_Response *resp;
+
+    (void) cls;
+    (void) url;
+    (void) version;
+    (void) upload_data;
+    (void) upload_data_size;
+    (void) con_cls;
+
+    if (strcmp(method, "GET") != 0 && strcmp(method, "HEAD") != 0)
+        return MHD_NO;
+
+    resp = MHD_create_response_from_buffer(TEST_BODY_SIZE, test_body,
+                                          MHD_RESPMEM_MUST_COPY);
+    if (resp == NULL)
+        return MHD_NO;
+    MHD_queue_response(conn, MHD_HTTP_OK, resp);
+    MHD_destroy_response(resp);
+    return MHD_YES;
+}
+
+/* Common startup code for both server modes. */
+static int server_start_common(unsigned short port,
+                               struct test_server **serverp,
+                               MHD_AccessHandlerCallback cb)
 {
     struct test_server *server;
 
@@ -147,8 +182,7 @@ int test_server_start(unsigned short port, struct test_server **serverp)
         return -1;
 
     server->daemon = MHD_start_daemon(MHD_USE_INTERNAL_POLLING_THREAD, port,
-                                     NULL, NULL, &answer_cb, NULL,
-                                     MHD_OPTION_END);
+                                     NULL, NULL, cb, NULL, MHD_OPTION_END);
     if (server->daemon == NULL) {
         free(server);
         return -1;
@@ -156,6 +190,16 @@ int test_server_start(unsigned short port, struct test_server **serverp)
 
     *serverp = server;
     return 0;
+}
+
+int test_server_start(unsigned short port, struct test_server **serverp)
+{
+    return server_start_common(port, serverp, &answer_cb);
+}
+
+int test_server_start_plain(unsigned short port, struct test_server **serverp)
+{
+    return server_start_common(port, serverp, &answer_plain_cb);
 }
 
 void test_server_stop(struct test_server *server)

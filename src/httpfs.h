@@ -2,7 +2,7 @@
  * SPDX-FileCopyrightText: 2026 Claire Ivanenka <claire@gnu-ai.org> */
 
 /*
- * httpfs.h — Node structure of the httpfs filesystem.
+ * httpfs.h — Node model of the httpfs filesystem (Phase 2).
  *
  * NAVIGATION PRINCIPLE
  * --------------------
@@ -10,21 +10,36 @@
  *
  *      settrans -a /web httpfs https://example.org
  *
- * Every POSIX directory in the tree then corresponds to a URL
- * path, and every directory — at any level — exposes three virtual
- * files describing ITS OWN resource:
+ * Every POSIX directory in the tree corresponds to a URL path, and
+ * every directory — at any level — exposes three virtual files
+ * describing ITS OWN resource:
  *
  *      /web/.../content   the raw body received from the server
  *      /web/.../headers   the raw HTTP headers of the response
  *      /web/.../status    the HTTP status code (e.g. "200\n")
  *
- * So   cat /web/content                  downloads the root, while
- *      cat /web/docs/page.html/content   downloads the sub-path.
- * The scheme is uniform, hence predictable for a software agent
- * (an LLM) exploring the web through the translator.
+ * PHASE 2 ADDITIONS (implemented in netfs.c)
+ * -----------------------------------------
+ *   1. Node cache — every looked-up child is remembered by its
+ *      parent (per-name child list) and kept alive by a global MRU
+ *      cache of bounded size (HTTPFS_NODE_CACHE_MAX).  Re-opening
+ *      a path reuses the node and its downloaded resource instead
+ *      of starting from scratch.
  *
- * The resource of a directory is downloaded ONCE, then kept in
- * memory for the whole life of the node (the "fetched" flag below).
+ *   2. Range streaming — the resource of a directory is now
+ *      described by a small state machine:
+ *
+ *        UNKNOWN --(HEAD)--> probed metadata {status, size, mtime}
+ *          |
+ *          +--(first read: GET bytes=0-65535)
+ *                206 --> BLOCKS mode: reads fetch only the 64 KiB
+ *                                windows they touch (bounded cache)
+ *                200 --> FULLBODY mode: the server ignores Range,
+ *                                the whole body is kept in memory
+ *                                (the Phase 1 behavior)
+ *
+ *      As a result, stat'ing a view no longer downloads anything
+ *      when the server announces the size (HEAD + Content-Length).
  */
 
 #ifndef HTTPFS_HTTPFS_H
@@ -42,6 +57,19 @@
 #include "http.h"
 
 /* ------------------------------------------------------------------
+ * Constants
+ * ------------------------------------------------------------------ */
+
+/* Size of one block in BLOCKS mode, and the per-node budget of the
+   block cache.  A read fetches only the blocks it touches. */
+constexpr size_t HTTPFS_BLOCK_SIZE       = 64 * 1024;
+constexpr size_t HTTPFS_BLOCK_CACHE_BYTES = 4 * 1024 * 1024;
+
+/* Maximum number of nodes kept alive by the global MRU node cache
+   (each cached node holds one hard reference). */
+constexpr int HTTPFS_NODE_CACHE_MAX = 64;
+
+/* ------------------------------------------------------------------
  * Kind of a node
  * ------------------------------------------------------------------ */
 
@@ -57,6 +85,29 @@ enum httpfs_kind : int
 constexpr char HTTPFS_NAME_CONTENT[] = "content";
 constexpr char HTTPFS_NAME_HEADERS[] = "headers";
 constexpr char HTTPFS_NAME_STATUS[]  = "status";
+
+/* ------------------------------------------------------------------
+ * Resource state machine (directory nodes)
+ * ------------------------------------------------------------------ */
+
+enum httpfs_res_state
+{
+    RES_UNKNOWN = 0,  /* metadata not probed yet                        */
+    RES_PROBED,      /* HEAD done; content mode still undetermined      */
+    RES_FULLBODY,    /* whole body in res.full (server ignores Range)   */
+    RES_BLOCKS,      /* windowed access through the block cache        */
+    RES_ERROR,       /* transport-level failure (sticky)               */
+};
+
+/* One cached window of a resource in RES_BLOCKS mode. */
+struct httpfs_block
+{
+    struct httpfs_block *older;  /* FIFO ring links (older/newer)       */
+    struct httpfs_block *newer;
+    uint64_t idx;               /* block number                        */
+    size_t len;                 /* useful bytes in data                 */
+    char *data;                 /* the window's bytes                   */
+};
 
 /* ------------------------------------------------------------------
  * The httpfs-private node
@@ -80,15 +131,41 @@ struct netnode
     struct netnode *parent;    /* parent, nullptr for the root        */
     struct node *node;         /* back-pointer to the libnetfs node   */
 
-    /* --- Downloaded resource (directories only) ----------------- */
-    pthread_mutex_t res_lock;  /* protects the fields below          */
-    bool fetched;              /* has the resource been downloaded?   */
-    int res_err;               /* errno of the last download          */
-    struct http_response res;  /* body and metadata                   */
+    /* --- Per-parent child list (directories) -------------------- */
+    /* All live children of this node.  Guarded by the PARENT's
+       child_lock.  The membership lock is always taken BEFORE any
+       child node's libnetfs lock is touched, never the other way
+       round (see docs/architecture.md §4). */
+    struct netnode *children;      /* head of the child list         */
+    struct netnode *sibling_prev;
+    struct netnode *sibling_next;
+    pthread_mutex_t child_lock;
 
-    /* --- Reserved for Phase 2: per-name child cache ------------- */
-    hurd_ihash_t ihash_table;
-    pthread_mutex_t ihash_lock;
+    /* --- Global node-cache links --------------------------------- */
+    /* Managed by cache_node() in netfs.c; guarded by node_cache_lock.
+       A cached node holds one extra hard reference. */
+    struct node *cache_prev;
+    struct node *cache_next;
+
+    /* --- Resource of a directory node --------------------------- */
+    /* res_lock protects every field of this section. */
+    pthread_mutex_t res_lock;
+
+    bool meta_done;            /* HEAD probe done?                    */
+    int meta_err;              /* errno of the HEAD probe              */
+    struct http_response probe;/* the probe: headers + status + size   */
+
+    enum httpfs_res_state state;
+    int content_err;           /* sticky errno of the content engine   */
+
+    struct http_response full; /* RES_FULLBODY: the whole body         */
+    long long size;            /* whole-resource size, -1 unknown     */
+
+    /* RES_BLOCKS: window cache, keyed by block number. */
+    hurd_ihash_t blocks;
+    struct httpfs_block *block_oldest;  /* FIFO ring, oldest first    */
+    struct httpfs_block *block_newest;
+    size_t block_bytes;        /* bytes held by the block cache        */
 };
 
 /* ------------------------------------------------------------------

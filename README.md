@@ -144,10 +144,23 @@ downloaded **once** per node, cached in memory, and sliced on demand.
 
 ## Behavior in detail
 
-- **One GET per node.** The resource of a directory is downloaded the
-  first time one of its views is `stat`ed or read, then cached for the
-  life of the node. A second open of the same path re-fetches (a new
-  node is created per lookup); plan Phase 2 adds a shared cache.
+- **Node cache.** Every looked-up child is remembered by its parent
+  and kept alive by a global MRU cache (64 entries): re-opening a
+  path reuses the same node, and its downloaded resource is not
+  fetched again.
+- **Metadata probe.** `stat`ing a view costs one HTTP HEAD (status,
+  size from Content-Length, Last-Modified). The document itself is
+  not downloaded to answer a `stat` when the server announces the
+  size.
+- **Range streaming.** The first read triggers a ranged GET of the
+  first 64 KiB: if the server answers 206, the resource is read in
+  **64 KiB blocks**, fetched on demand and kept in a bounded
+  per-node cache (4 MiB). A `pread` deep inside a huge document
+  only downloads the windows it touches, faithfully mapping
+  `lseek`/`pread`. If the server ignores Range (200), httpfs falls
+  back to keeping the whole body in memory (the Phase 1 behavior).
+- **HTTP errors are not I/O errors** (unchanged): a 404 body is
+  readable through `content`, the code through `status`.
 - **HTTP errors are not I/O errors.** A `404` or `500` response is a
   successful transport: the body (error page, JSON message, …) is
   readable through `content`, and the code through `status`. Only
@@ -177,11 +190,14 @@ $ make check
 
 - `test_url` — always built; deterministic, no network: validates URL
   construction and percent-encoding (`src/http.c`).
-- `test_full_stream`, `test_range` — built when `libmicrohttpd` is
-  present: an embedded loopback HTTP server serves a deterministic
-  64 KiB body; the tests validate a full download byte for byte and
-  single-range requests (206/416 handling). Absent libmicrohttpd,
-  they are skipped and a warning is printed at configure time.
+- `test_full_stream`, `test_range`, `test_ranged_reads` — built when
+  `libmicrohttpd` is present: an embedded loopback HTTP server
+  serves a deterministic 64 KiB body (a range-capable flavor and a
+  Range-ignoring flavor).  The tests validate a full download byte
+  for byte, single-range requests (206/416), and the Phase 2
+  transport primitives (HEAD metadata, bounded and open-ended
+  windows, the 200 fallback).  Absent libmicrohttpd, they are
+  skipped and a warning is printed at configure time.
 
 Everything runs on `127.0.0.1`; no external network is touched.
 
@@ -230,20 +246,23 @@ transport layer (src/http.c) → libcurl → remote HTTP server
 
 ## Status and roadmap
 
-Implemented and working:
+Implemented and working (Phase 2 complete):
 - URL tree navigation with percent-encoding
 - `content` / `headers` / `status` views at every level
-- One-shot fetch with caching, redirects, gzip, timeouts
-- Read-only POSIX semantics, stable inodes, `Last-Modified` → `mtime`
-- Deterministic test suite (URL building; HTTP transport with
-  libmicrohttpd when available)
+- Node cache: repeated lookups reuse the same node and resource
+- HEAD metadata probe: `stat` does not download the document
+- HTTP `Range` streaming: reads fetch only the 64 KiB windows they
+  touch, with a bounded block cache and automatic fallback to
+  whole-body mode for servers that ignore Range
+- Redirects, gzip decoding, timeouts, `Last-Modified` → `mtime`
+- Read-only POSIX semantics, stable inodes
+- Deterministic test suite (4 tests, all passing)
 
 Planned (see `PLAN.md`):
-- Phase 2: shared node cache (the reserved `ihash` field), HTTP
-  `Range`-based streaming instead of full-body caching
 - Phase 3: stacked content translators (`htmlfs`, `jsonfs`, ...)
 - Phase 4: hardening, libmicrohttpd v2 fault injection, CI on
-  Debian GNU/Hurd under QEMU
+  Debian GNU/Hurd under QEMU (validation of the real libnetfs RPC
+  behavior under `settrans`)
 
 ## License
 

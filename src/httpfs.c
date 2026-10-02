@@ -38,7 +38,7 @@
 
 /* Variables required by libnetfs (defined by the translator). */
 char *netfs_server_name = "httpfs";
-char *netfs_server_version = "0.2.0";
+char *netfs_server_version = "0.3.0";
 int netfs_maxsymlinks = 8;
 
 int main (int argc, char *argv[])

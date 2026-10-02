@@ -7,10 +7,10 @@
 - [ ] Ensure tests model atomic POSIX calls and remain completely environment-agnostic.
 
 ## Phase 2: Refactoring Core `httpfs` (Raw Transport)
-- [ ] Strip all HTML parsing code from the current `httpfs` implementation.
-- [ ] Optimize `libnetfs` callbacks to map POSIX calls cleanly and performantly to the network.
-- [ ] Implement a robust seek mechanism using HTTP `Range` headers to faithfully map `lseek`/`pread`.
-- [ ] Validate `httpfs` against the Phase 1 test suite (must reliably yield 100% raw bytes while handling EOF, timeouts, and disconnects).
+- [x] Strip all HTML parsing code from the current `httpfs` implementation.
+- [x] Optimize `libnetfs` callbacks to map POSIX calls cleanly and performantly to the network.
+- [x] Implement a robust seek mechanism using HTTP `Range` headers to faithfully map `lseek`/`pread`.
+- [x] Validate `httpfs` against the Phase 1 test suite (must reliably yield 100% raw bytes while handling EOF, timeouts, and disconnects).
 
 ## Phase 3: Content-Type Translators Architecture (The Parser Chain)
 - [ ] **`htmlfs`:** Develop the standalone DOM/HTML parsing translator and interface it to be stacked via `settrans` on top of `httpfs`.

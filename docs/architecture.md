@@ -120,37 +120,86 @@ Per the libnetfs contract, a node returned by a successful lookup is
 **locked** and holds one **hard reference**; the lookup itself always
 unlocks `dir` (except when `*np == dir`, i.e. the `.` case).
 
-## 5. Locking protocol
+## 5. Locking, reference and cache protocols
 
-Two mutexes coexist:
+Four mutexes coexist (Phase 2):
 
-| Mutex            | Owner        | Scope                                      |
-|------------------|--------------|--------------------------------------------|
-| `np->lock`       | libnetfs     | serialized access to the node; callbacks see the node locked |
-| `nn->res_lock`   | httpfs       | serializes the download and protects `res`, `res_err`, `fetched` |
+| Mutex             | Owner   | Scope                                          |
+|-------------------|---------|------------------------------------------------|
+| `np->lock`        | libnetfs| serialized access to the node; callbacks see it locked |
+| `nn->res_lock`    | httpfs  | the whole resource state machine (§5.2)       |
+| `nn->child_lock`  | httpfs  | the parent's child list                       |
+| `node_cache_lock` | httpfs  | the global MRU node cache                      |
 
-`ensure_resource(nn)`:
+Locking order: `np->lock` → `child_lock` / `res_lock` /
+`node_cache_lock`. Nothing ever takes an `np->lock` while holding a
+`child_lock`; and the node cache is only entered while the *newly
+created* node is locked (never the LRU victim), so the eviction
+cascade can never deadlock on a lock we hold. The traversal
+reference that libnetfs keeps on the directory being looked through
+additionally guarantees that the eviction cascade can never free
+that directory.
 
-```c
-lock (nn->res_lock);
-if (!nn->fetched) { nn->res_err = http_fetch (nn->url, &nn->res);
-                    nn->fetched = true; }
-err = nn->res_err;
-unlock (nn->res_lock);
-return err;
+### 5.1 The node cache (Phase 2)
+
+Every child created by a lookup is entered in its parent's child
+list *and* in a global MRU cache of `HTTPFS_NODE_CACHE_MAX` (64)
+entries, each holding one hard reference — the ftpfs pattern. The
+sequence:
+
+- `create_child` (called with `dir` locked): builds the node, pins
+  the parent (`netfs_nref(dir)`), inserts into the child list
+  (under `child_lock`), then `cache_node(np)` adds the cache's own
+  reference and evicts the oldest entries with `netfs_nrele`.
+- `netfs_attempt_lookup` first searches the parent's live children;
+  a hit is returned directly (`netfs_nref` under the membership
+  lock, then the node is locked after releasing the parent's lock —
+  the same discipline as ftpfs).
+- `netfs_node_norefs` unlinks the dying node from its parent's list
+  (under `child_lock`, while the node's `np->lock` is held), then
+  releases the parent pin; the cascade can walk up the chain
+  without ever locking the directory currently being traversed.
+
+### 5.2 The resource engine (Phase 2)
+
+A directory's resource is a small state machine
+(`enum httpfs_res_state`, see httpfs.h):
+
+```
+UNKNOWN --ensure_metadata--> PROBED --ensure_content--> FULLBODY | BLOCKS
+                                                     \--> ERROR (sticky)
 ```
 
-Concurrent readers of the same directory trigger exactly one GET; the
-others wait on `res_lock` and then observe `fetched == true`.
+- `ensure_metadata` — one HEAD, once per node: status, whole size
+  (from Content-Range/Content-Length), Last-Modified, raw headers.
+  The probe response feeds the `status` and `headers` views forever.
+- `ensure_content` — one ranged GET of the first block on the first
+  read: 206 → BLOCKS mode (per-block `Range` requests from now on,
+  cached in a 64-entry-free FIFO of 64 KiB blocks, bounded at 4 MiB
+  per node); 200 → FULLBODY mode (the server ignores Range: the
+  whole body received is kept, Phase 1 behavior); transport errors
+  are sticky in `content_err`.
+- `read_blocks` — serves a read window by touching only the blocks
+  it overlaps; a 416 answer installs an empty block (end of
+  resource), a short block marks the true size when the server
+  never announced it.
+- `resource_size` — the size for `stat`: HEAD-only when the server
+  announces it; the content engine runs only when nothing else can
+  reveal the size (e.g. an error page).
 
 Note: `netfs_validate_stat` and `netfs_attempt_read` run with the
-libnetfs node lock held, so a first access blocks the RPC thread for
-the duration of the HTTP request (bounded by the 60 s transfer
-timeout). This is the documented v1 behavior.
+libnetfs node lock held, so the first access to a resource blocks
+the RPC thread for the duration of its HTTP request(s) (each bounded
+by the 60 s transfer timeout). This is the documented behavior.
 
 ## 6. Resource fetching (`src/http.c`)
 
-`http_fetch(url, out)` performs one GET with:
+Three request flavors share one engine (`http_get_impl`):
+`http_head` (HEAD, metadata), `http_fetch` (plain GET) and
+`http_fetch_range` (GET + `Range: bytes=start-end`). Every response
+carries `size_total` — the best known whole-resource size from
+Content-Range, Content-Length or the received body — and the raw
+header block. `http_fetch` performs one GET with:
 
 | Option                    | Value | Rationale |
 |---------------------------|-------|-----------|
@@ -185,8 +234,8 @@ structure (idempotent).
 | `open`/permissions | `netfs_check_open_permissions` | always 0 (read-only, world-readable) |
 | path resolution | `netfs_attempt_lookup` | §3; never touches the network |
 | `stat/fstat` (directory) | `netfs_validate_stat` | mode `0555`, size 4096 (indicative), no fetch |
-| `stat` (view) | `netfs_validate_stat` | **triggers the parent's GET**; mode `0444`; `st_size` = view size; `st_mtime` from `Last-Modified`; `st_ino` = FNV-1a(URL) xor kind |
-| `read`/`pread` (view) | `netfs_attempt_read` | slices the cached resource; offset beyond the end → `*len = 0` (EOF) |
+| `stat` (view) | `netfs_validate_stat` | **one HEAD probe** (no document download when the size is announced); mode `0444`; `st_size` = view size; `st_mtime` from `Last-Modified`; `st_ino` = FNV-1a(URL) xor kind |
+| `read`/`pread` (view) | `netfs_attempt_read` | BLOCKS mode: fetches only the 64 KiB windows touched; FULLBODY mode: slices the cached body; offset beyond the end → `*len = 0` (EOF) |
 | `read` (directory) | `netfs_attempt_read` | `EISDIR` |
 | `getdents` | `netfs_get_dirents` | the three views, at every level; entries built like ftpfs (`d_namlen`, `d_reclen`, `d_type = DT_REG`) |
 | `write`, `truncate`, `chmod`, `chown`, `mkdir`, `unlink`, … | corresponding `netfs_attempt_*` | `EROFS` (read-only filesystem) |
@@ -263,19 +312,21 @@ callbacks directly against a real HTTP server (the verification
 harness used during development); on the Hurd, end-to-end behavior is
 additionally covered by `settrans` + ordinary tools.
 
-## 11. Known limitations (v0.2)
+## 11. Known limitations (v0.3)
 
-- One GET per node, full body cached in memory: a large resource
-  costs RAM proportional to its size, and re-opening a path
-  re-downloads it (no shared cache yet — the `ihash` field is the
-  Phase 2 hook).
-- No HTTP `Range` streaming: `pread` is served from the cached copy
-  (Phase 2 plans direct range requests).
-- `stat`ing a view triggers the download; a `ls -l` on a directory
-  downloads that directory's resource (not the children's).
+- Servers that ignore Range keep the whole body in memory
+  (FULLBODY mode): a large resource still costs RAM proportional to
+  its size.
+- The node cache is per-translator and holds at most 64 nodes; a
+  very wide traversal evicts older paths, which will re-probe on
+  their next lookup.
+- No cache invalidation: a node keeps what it saw for its (short)
+  life; there is no TTL, no If-Modified-Since revalidation.
+- The `headers` view shows the HEAD probe's headers, not the
+  headers of the ranged GETs that later fetched the blocks.
 - Reserved names shadow remote path components named `content`,
   `headers` or `status`.
-- No cache invalidation: a node keeps the first response it saw for
-  its whole (short) life.
 - Query strings and fragments cannot be expressed in the path
   (path components only).
+- First access to a resource blocks its RPC thread for the HTTP
+  request (no async I/O yet).

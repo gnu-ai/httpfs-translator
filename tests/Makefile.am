@@ -20,13 +20,17 @@ AM_CFLAGS += $(MHD_CFLAGS)
 check_LIBRARIES = libtestharness.a
 libtestharness_a_SOURCES = test_helpers.c test_helpers.h
 
-check_PROGRAMS += test_full_stream test_range
+check_PROGRAMS += test_full_stream test_range test_ranged_reads
 
 test_full_stream_SOURCES = test_full_stream.c
 test_full_stream_LDADD = libtestharness.a $(MHD_LIBS) $(CURL_LIBS)
 
 test_range_SOURCES = test_range.c
 test_range_LDADD = libtestharness.a $(MHD_LIBS) $(CURL_LIBS)
+
+test_ranged_reads_SOURCES = test_ranged_reads.c $(top_srcdir)/src/http.c
+test_ranged_reads_CPPFLAGS = -I$(top_srcdir)/src
+test_ranged_reads_LDADD = libtestharness.a $(MHD_LIBS) $(CURL_LIBS)
 
 endif
 

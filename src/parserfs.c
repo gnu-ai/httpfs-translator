@@ -13,7 +13,7 @@
  *      doc_node --(first lookup)--> struct node   (in doc->priv)
  *                 --(last reference gone)--> freed
  *
- * Each libnetfs node is a tiny shell (struct pfs_netnode) holding
+ * Each libnetfs node is a tiny shell (struct netnode) holding
  * only a pointer to its doc_node; all the data — names, bytes,
  * tree links — lives in the doc tree.  Nothing is cached beyond
  * that: a re-lookup after the shell died simply builds a new one.
@@ -66,7 +66,7 @@ static struct doc_node *the_tree;
 /* The node shell
  * ------------------------------------------------------------------ */
 
-struct pfs_netnode
+struct netnode
 {
     struct doc_node *doc;      /* the real content            */
 };
@@ -86,7 +86,7 @@ static bool is_dir (const struct doc_node *d)
    the whole translator goes away. */
 static struct node *make_shell (struct doc_node *d)
 {
-    struct pfs_netnode *nn = malloc (sizeof *nn);
+    struct netnode *nn = malloc (sizeof *nn);
     if (nn == NULL)
         return NULL;
     nn->doc = d;
@@ -165,7 +165,7 @@ static ino_t ino_of (const struct doc_node *d)
 error_t netfs_attempt_lookup (struct iouser *user, struct node *dir,
                               const char *name, struct node **np)
 {
-    struct pfs_netnode *dn = dir->nn;
+    struct netnode *dn = dir->nn;
 
     (void) user;               /* a read-only, world-readable tree */
     *np = nullptr;
@@ -232,7 +232,7 @@ error_t netfs_get_dirents (struct iouser *cred, struct node *dir, int entry,
                            mach_msg_type_number_t *datacnt, vm_size_t bufsize,
                            int *amt)
 {
-    struct pfs_netnode *dn = dir->nn;
+    struct netnode *dn = dir->nn;
 
     (void) cred;
     (void) bufsize;
@@ -313,7 +313,7 @@ error_t netfs_get_dirents (struct iouser *cred, struct node *dir, int entry,
 /* netfs_validate_stat — fill in np->nn_stat from the doc node. */
 error_t netfs_validate_stat (struct node *np, struct iouser *cred)
 {
-    struct pfs_netnode *nn = np->nn;
+    struct netnode *nn = np->nn;
     struct doc_node *d = nn->doc;
     (void) cred;
 
@@ -339,7 +339,7 @@ error_t netfs_validate_stat (struct node *np, struct iouser *cred)
 error_t netfs_attempt_read (struct iouser *cred, struct node *np,
                             loff_t offset, size_t *len, void *data)
 {
-    struct pfs_netnode *nn = np->nn;
+    struct netnode *nn = np->nn;
     (void) cred;
 
     if (is_dir (nn->doc))
@@ -372,7 +372,7 @@ error_t netfs_attempt_read (struct iouser *cred, struct node *np,
    it. */
 void netfs_node_norefs (struct node *np)
 {
-    struct pfs_netnode *nn = np->nn;
+    struct netnode *nn = np->nn;
 
     if (nn != nullptr)
         {

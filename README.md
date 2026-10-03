@@ -267,9 +267,9 @@ Implemented and working (Phase 2 complete):
 
 Planned (see `PLAN.md`):
 - Phase 3: stacked content translators (`htmlfs`, `jsonfs`, ...)
-- Phase 4: hardening, libmicrohttpd v2 fault injection, and a CI
-  workflow running the build + test suite on Debian GNU/Hurd under
-  QEMU at every commit
+- Phase 4: hardening, libmicrohttpd v2 fault injection
+- CI automation on GNU/Hurd under QEMU, driven by the headless
+  sandbox [gnu-ai/mistral-vm-debian-hurd](https://github.com/gnu-ai/mistral-vm-debian-hurd)
 
 ## License
 

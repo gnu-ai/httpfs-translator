@@ -31,9 +31,11 @@ settrans -a /web "$BINARY" "http://127.0.0.1:$PORT"
 
 [ "$(cat /web/status 2>/dev/null)" = "200" ] \
     || fail "status view should report 200"
-[ "$(cat /web/content 2>/dev/null)" = "Bonjour, monde !" ] \
+# NB: /web/content is the server's directory listing (the body of
+# the root URL); the exact bytes of a file live under its own path.
+[ "$(cat /web/hello.txt/content 2>/dev/null)" = "Bonjour, monde !" ] \
     || fail "content view should return the exact body"
-[ "$(stat -c %s /web/content 2>/dev/null)" = "16" ] \
+[ "$(stat -c %s /web/hello.txt/content 2>/dev/null)" = "16" ] \
     || fail "stat should know the size without a download"
 [ "$(cat /web/hello.txt/status 2>/dev/null)" = "200" ] \
     || fail "deep URL path should work"
@@ -56,7 +58,10 @@ printf 'name,year\nGNU,1983\n' > /tmp/httpfs-smoke/table.csv
 printf '<html><head><title>Smoke &amp; Test</title></head><body><h1>Hi</h1><a href="/x">link</a></body></html>' \
     > /tmp/httpfs-smoke/page.html
 
-mkdir -p /web/api.json /web/table.csv /web/page.html
+# The parser mount points live on the real filesystem; the SOURCE
+# paths (/web/api.json/content, ...) need no mkdir — httpfs
+# synthesizes URL directories, and the tree is read-only anyway.
+mkdir -p /api /table /page
 
 settrans -a /api "$SRCDIR/jsonfs" /web/api.json/content
 [ "$(cat /api/version 2>/dev/null)" = "1.2" ] \

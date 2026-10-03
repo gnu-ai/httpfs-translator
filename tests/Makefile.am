@@ -13,6 +13,19 @@ test_url_SOURCES = test_url.c $(top_srcdir)/src/http.c
 test_url_CPPFLAGS = -I$(top_srcdir)/src
 test_url_LDADD = $(CURL_LIBS)
 
+# Phase 3 : les analyseurs (parsers) sont du pur POSIX C23 — aucune dépendance,
+# aucun réseau, aucune machine Hurd : les suites s'exécutent partout.
+check_PROGRAMS += test_json test_html test_csv
+
+test_json_SOURCES = test_json.c $(top_srcdir)/src/doc.c $(top_srcdir)/src/json.c
+test_json_CPPFLAGS = -I$(top_srcdir)/src
+
+test_html_SOURCES = test_html.c $(top_srcdir)/src/doc.c $(top_srcdir)/src/html.c
+test_html_CPPFLAGS = -I$(top_srcdir)/src
+
+test_csv_SOURCES = test_csv.c $(top_srcdir)/src/doc.c $(top_srcdir)/src/csv.c
+test_csv_CPPFLAGS = -I$(top_srcdir)/src
+
 if HAVE_MHD
 
 AM_CFLAGS += $(MHD_CFLAGS)

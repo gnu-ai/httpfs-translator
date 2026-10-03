@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # SPDX-FileCopyrightText: 2026 Claire Ivanenka <claire@gnu-ai.org>
 
-AC_INIT([httpfs], [0.3.0], [gcannata23@gmail.com])
+AC_INIT([httpfs], [0.4.0], [gcannata23@gmail.com])
 AC_CONFIG_SRCDIR([src/httpfs.c])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign subdir-objects])
 

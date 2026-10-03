@@ -333,3 +333,73 @@ against both range-capable and Range-ignoring servers.
   (path components only).
 - First access to a resource blocks its RPC thread for the HTTP
   request (no async I/O yet).
+
+## 12. The parser chain (Phase 3, v0.4)
+
+Phase 3 adds four read-only translators that interpret a document
+instead of transporting it: `htmlfs`, `jsonfs`, `csvfs` and `tsvfs`.
+They stack on `httpfs` through ordinary paths:
+
+```
+settrans -a /web httpfs https://example.org/api/x
+settrans -a /api jsonfs /web/content
+cat /api/version
+```
+
+Mounting `/api` opens `/web/content` with plain POSIX semantics,
+which triggers the httpfs download — translators compose by
+paths, with no new protocol between them.
+
+### 12.1 The portable document tree (doc.c)
+
+All four parsers build the same structure: a `struct doc_node`
+tree of directories and files (first child / next sibling
+representation).  The tree is deliberately Hurd-free — plain
+C23 + POSIX — so the parsers compile and are unit-tested on any
+POSIX system (`tests/test_json.c`, `test_html.c`, `test_csv.c`),
+exactly like the transport layer (`http.c`).
+
+Names are guaranteed safe and unique by the tree itself
+(`doc_safe_name`, `doc_unique_name`): a JSON key `a/b` becomes
+`a_b`, a duplicate becomes `a_2`.  A parser can therefore never
+emit a name that breaks a directory walk.
+
+### 12.2 One server for four parsers (parserfs.c)
+
+Only `parserfs.c` knows about libnetfs.  It is the same callback
+set as the Phase 2 server (§4-§7), minus everything a static tree
+does not need:
+
+- `netfs_attempt_lookup` walks the doc tree and lazily wraps a
+  doc node in a libnetfs "shell" (`doc_node.priv`);
+- each shell holds one **permanent** reference, so a client
+  dropping its last reference can never race a concurrent
+  lookup — the shell lives exactly as long as the static tree;
+- `netfs_get_dirents` paginates the child list with the same
+  mmap discipline as §6;
+- `netfs_attempt_read` is a plain `memcpy` from the node bytes.
+
+A parser translator therefore reduces to: read the source file
+(`pfs_read_file`, bounded at 256 MiB), build the tree, call
+`pfs_serve` (tree, name, version).
+
+### 12.3 What each parser exposes
+
+| Translator  | Tree |
+|-------------|------|
+| `htmlfs`    | `/title`, `/text` (normalized visible text), `/meta/<name>`, `/headings/<n>` (`level<TAB>text`), `/links/<n>/{url,text}` |
+| `jsonfs`    | objects → directories, arrays → `0, 1, ...`, scalars → files (strings decoded, numbers verbatim); a container root is re-homed at the top level |
+| `csvfs`     | `/count`, `/header/<i>`, `/rows/<n>/<column>` (row view), `/columns/<column>` (column view) |
+| `tsvfs`     | same program as `csvfs`, default delimiter `\t` (chosen by `argv[0]`); `-d` overrides; `csvfs` sniffs the delimiter from the header line |
+
+All three parsers are bounded (`JSON_MAX_NODES`,
+`HTML_MAX_ITEMS`, `CSV_MAX_CELLS`): a hostile document fails
+loudly at parse time instead of exhausting the host.
+
+### 12.4 Tolerance policy
+
+`htmlfs` and `csvfs` never fail: a truncated or hostile document
+yields a partial tree, the way a browser still renders broken
+pages.  `jsonfs` is the exception — JSON has a grammar, so a
+malformed document refuses to mount with a byte-precise error
+message, rather than serving an LLM silently-wrong data.

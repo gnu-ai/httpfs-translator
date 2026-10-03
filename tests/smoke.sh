@@ -42,6 +42,51 @@ settrans -a /web "$BINARY" "http://127.0.0.1:$PORT"
 [ "$(head -c 40 /web/headers 2>/dev/null)" != "" ] \
     || fail "headers view should be readable"
 
+# ------------------------------------------------------------------
+# Phase 3: the parser chain, stacked on the transport above.
+# The same loopback server serves a JSON and a CSV document; the
+# parsers mount /web/content-style views of them.
+# ------------------------------------------------------------------
+
+SRCDIR=$(dirname "$BINARY")
+
+printf '{"version": "1.2", "stable": true, "mirrors": ["a", "b"]}' \
+    > /tmp/httpfs-smoke/api.json
+printf 'name,year\nGNU,1983\n' > /tmp/httpfs-smoke/table.csv
+printf '<html><head><title>Smoke &amp; Test</title></head><body><h1>Hi</h1><a href="/x">link</a></body></html>' \
+    > /tmp/httpfs-smoke/page.html
+
+mkdir -p /web/api.json /web/table.csv /web/page.html
+
+settrans -a /api "$SRCDIR/jsonfs" /web/api.json/content
+[ "$(cat /api/version 2>/dev/null)" = "1.2" ] \
+    || fail "jsonfs should expose the version member"
+[ "$(cat /api/stable 2>/dev/null)" = "true" ] \
+    || fail "jsonfs should expose the boolean member"
+[ "$(cat /api/mirrors/1 2>/dev/null)" = "b" ] \
+    || fail "jsonfs should expose array entries"
+settrans -D /api
+
+settrans -a /table "$SRCDIR/csvfs" /web/table.csv/content
+[ "$(cat /table/count 2>/dev/null)" = "1" ] \
+    || fail "csvfs should count the data rows"
+[ "$(cat /table/rows/0/year 2>/dev/null)" = "1983" ] \
+    || fail "csvfs row view should expose the year cell"
+[ "$(cat /table/columns/name 2>/dev/null)" = "GNU" ] \
+    || fail "csvfs column view should expose the name values"
+settrans -D /table
+
+settrans -a /page "$SRCDIR/htmlfs" /web/page.html/content
+[ "$(cat /page/title 2>/dev/null)" = "Smoke & Test" ] \
+    || fail "htmlfs should decode entities in the title"
+[ "$(cat /page/headings/0 2>/dev/null)" = "1	Hi
+" ] \
+    || fail "htmlfs should expose the heading"
+[ "$(cat /page/links/0/url 2>/dev/null)" = "/x
+" ] \
+    || fail "htmlfs should expose the link target"
+settrans -D /page
+
 settrans -D /web
 kill "$SERVER" 2>/dev/null || true
 rm -rf /tmp/httpfs-smoke

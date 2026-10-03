@@ -13,10 +13,10 @@
 - [x] Validate `httpfs` against the Phase 1 test suite (must reliably yield 100% raw bytes while handling EOF, timeouts, and disconnects).
 
 ## Phase 3: Content-Type Translators Architecture (The Parser Chain)
-- [ ] **`htmlfs`:** Develop the standalone DOM/HTML parsing translator and interface it to be stacked via `settrans` on top of `httpfs`.
-- [ ] **`jsonfs`:** Design and build the JSON translator to map JSON trees into Mach file system nodes.
-- [ ] **`csvfs` / `tsvfs`:** Develop interfaces to dynamically interpret structured text tables.
-- [ ] Write dedicated test suites to verify correct I/O interactions between the transport translator (`httpfs`) and parser translators.
+- [x] **`htmlfs`:** Develop the standalone DOM/HTML parsing translator and interface it to be stacked via `settrans` on top of `httpfs` (tolerant single-pass extractor: title, visible text, meta, headings, links).
+- [x] **`jsonfs`:** Design and build the JSON translator to map JSON trees into Mach file system nodes (objects → directories, arrays → numbered entries, scalars → files).
+- [x] **`csvfs` / `tsvfs`:** Develop interfaces to dynamically interpret structured text tables (RFC 4180 dialect, delimiter sniffing, row and column views; `tsvfs` is `csvfs` under its tab default).
+- [x] Write dedicated test suites to verify correct I/O interactions between the transport translator (`httpfs`) and parser translators (`test_json`, `test_html`, `test_csv` unit tests plus the stacking section of `tests/smoke.sh`).
 
 ## Phase 4: Evolution & Hardening
 - [ ] Controlled migration of embedded tests from `libmicrohttpd` v1 to **`libmicrohttpd` v2**, leveraging new APIs for increased I/O determinism (e.g., complex fault-injection scenarios).

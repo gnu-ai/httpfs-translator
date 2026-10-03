@@ -17,9 +17,20 @@ content  headers  status
 
 No HTML parsing, no JSON handling, no content interpretation of any
 kind: `httpfs` is a **pure transport layer**. Semantic interpretation
-is delegated to downstream translators stacked on top of it
-(`htmlfs`, `jsonfs`, ...) following the Hurd translator philosophy
-described in `CONTEXT.md`.
+is delegated to the parser translators stacked on top of it —
+`htmlfs`, `jsonfs`, `csvfs`, `tsvfs` (Phase 3, shipped in this
+release) — following the Hurd translator philosophy described in
+`CONTEXT.md`:
+
+```console
+$ settrans -a /page htmlfs /web/content      # parse the HTML body
+$ cat /page/title
+$ ls /page/links
+$ settrans -a /api jsonfs /web/api/content   # a JSON answer as files
+$ cat /api/version
+$ settrans -a /table csvfs /web/stats.csv/content
+$ cat /table/columns/year
+```
 
 ---
 
@@ -99,8 +110,9 @@ To build out of tree: `mkdir build && cd build && ../configure && make`.
 ## Installing and mounting
 
 ```console
-$ make install                                # /usr/local/bin/httpfs
-$ settrans -a /web httpfs https://example.org  # mount
+$ make install                                # httpfs, htmlfs, jsonfs, csvfs, tsvfs
+$ settrans -a /web httpfs https://example.org  # mount the transport
+$ settrans -a /page htmlfs /web/content        # stack a parser on it
 $ settrans -D /web                             # unmount
 ```
 
@@ -208,7 +220,7 @@ Everything runs on `127.0.0.1`; no external network is touched.
 LICENSE                  GPLv3 full text
 README.md                 this document
 INSTALL.md                build and installation instructions
-docs/architecture.md      internals: locks, references, POSIX mapping
+docs/architecture.md      internals: locks, references, POSIX mapping, parser chain
 CONTEXT.md                project vision (transport-layer purity)
 PLAN.md                   development roadmap
 src/
@@ -216,11 +228,19 @@ src/
   httpfs.c                entry point: argument parsing, netfs startup
   httpfs.h                node model: struct netnode, view kinds
   netfs.c                 libnetfs callbacks: lookup, stat, dirents, read
+  doc.c / doc.h           portable document tree (the parser output model)
+  json.c / json.h         JSON parser (RFC 8259, bounded)
+  html.c / html.h         tolerant HTML extractor (title, text, meta, links)
+  csv.c / csv.h           CSV/TSV parser (RFC 4180, delimiter sniffing)
+  parserfs.c / parserfs.h  the one libnetfs server shared by the parsers
+  jsonfs.c / htmlfs.c / csvfs.c   translator entry points
 tests/
   test_url.c              URL construction (deterministic)
+  test_json.c / test_html.c / test_csv.c   parser unit tests (any POSIX system)
   test_helpers.c / .h     embedded HTTP server (libmicrohttpd) + fetcher
   test_full_stream.c      whole-body download validation
   test_range.c            single-range request validation
+  smoke.sh                end-to-end settrans test (GNU/Hurd only)
 configure.ac              build system (C23 detection, optional MHD)
 ```
 
@@ -253,7 +273,7 @@ the real `libnetfs`/`libihash`/`libiohelp`, and mounting through
 `settrans` was verified against live web servers (both range-capable
 and Range-ignoring).
 
-Implemented and working (Phase 2 complete):
+Implemented and working (Phase 2 + Phase 3 complete):
 - URL tree navigation with percent-encoding
 - `content` / `headers` / `status` views at every level
 - Node cache: repeated lookups reuse the same node and resource
@@ -263,10 +283,16 @@ Implemented and working (Phase 2 complete):
   whole-body mode for servers that ignore Range
 - Redirects, gzip decoding, timeouts, `Last-Modified` → `mtime`
 - Read-only POSIX semantics, stable inodes
-- Deterministic test suite (4 tests, all passing)
+- The parser chain, stacked through ordinary paths:
+  `htmlfs` (title, text, meta, headings, links), `jsonfs`
+  (objects → directories, arrays → numbered entries, scalars →
+  files), `csvfs`/`tsvfs` (row and column views, RFC 4180,
+  delimiter sniffing)
+- Deterministic test suite (7 tests, all passing: the parsers run
+  on any POSIX system, the transport tests on any system with
+  libmicrohttpd)
 
 Planned (see `PLAN.md`):
-- Phase 3: stacked content translators (`htmlfs`, `jsonfs`, ...)
 - Phase 4: hardening, libmicrohttpd v2 fault injection
 - CI automation on GNU/Hurd under QEMU, driven by the headless
   sandbox [gnu-ai/mistral-vm-debian-hurd](https://github.com/gnu-ai/mistral-vm-debian-hurd)

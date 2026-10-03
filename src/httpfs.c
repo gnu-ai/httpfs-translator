@@ -34,6 +34,7 @@
 #include <hurd.h>
 
 #include "httpfs.h"
+#include "options.h"
 #include <hurd/netfs.h>
 
 /* Variables required by libnetfs (defined by the translator). */
@@ -41,12 +42,28 @@ char *netfs_server_name = "httpfs";
 char *netfs_server_version = "0.4.0";
 int netfs_maxsymlinks = 8;
 
+/* Program-specific usage block completed by --help. */
+static const char usage_httpfs[] =
+    "Mount an HTTP base URL as a filesystem:\n"
+    "  settrans -a <mount point> httpfs <URL>\n"
+    "Then read the tree: /web/content, /web/status, /web/headers,\n"
+    "or a deeper path such as /web/docs/x.html/content.\n"
+    "\n"
+    "Report bugs at <https://github.com/gnu-ai/httpfs-translator/issues>.\n";
+
 int main (int argc, char *argv[])
 {
     error_t err;
     mach_port_t bootstrap;
     struct netnode *nn_root;
     const char *base_url = nullptr;
+
+    /* --- The GNU base commands ----------------------------------
+       --version and --help are answered before any Hurd library
+       is initialized; the translator stays inspectable like any
+       other GNU tool. */
+    if (options_handle (argc, argv, "httpfs", usage_httpfs))
+        return EXIT_SUCCESS;
 
     /* --- Retrieve the base URL -----------------------------------
        settrans hands its arguments to the translator; the first

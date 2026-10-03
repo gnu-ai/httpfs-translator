@@ -47,4 +47,5 @@ test_ranged_reads_LDADD = libtestharness.a $(MHD_LIBS) $(CURL_LIBS)
 
 endif
 
-TESTS = $(check_PROGRAMS)
+TESTS = test_cli.sh $(check_PROGRAMS)
+EXTRA_DIST = test_cli.sh

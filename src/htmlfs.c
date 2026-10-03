@@ -31,13 +31,28 @@
 #include <stdlib.h>
 
 #include "html.h"
+#include "options.h"
 #include "parserfs.h"
+
+/* Program-specific usage block completed by --help. */
+static const char usage_htmlfs[] =
+    "Mount an HTML document as a filesystem:\n"
+    "  settrans -a <mount point> htmlfs <source file>\n"
+    "The page is read once at mount time; re-mount to refresh.\n"
+    "\n"
+    "Report bugs at <https://github.com/gnu-ai/httpfs-translator/issues>.\n";
 
 int main (int argc, char *argv[])
 {
     const char *source = nullptr;
     char *buf = nullptr;
     size_t len = 0;
+
+    /* --- The GNU base commands ----------------------------------
+       --version and --help are answered before anything is
+       mounted. */
+    if (options_handle (argc, argv, "htmlfs", usage_htmlfs))
+        return EXIT_SUCCESS;
 
     /* The first non-option argument is the source document. */
     for (int i = 1; i < argc; i++)

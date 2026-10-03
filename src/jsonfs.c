@@ -29,7 +29,16 @@
 #include <stdlib.h>
 
 #include "json.h"
+#include "options.h"
 #include "parserfs.h"
+
+/* Program-specific usage block completed by --help. */
+static const char usage_jsonfs[] =
+    "Mount a JSON document as a filesystem:\n"
+    "  settrans -a <mount point> jsonfs <source file>\n"
+    "The document is read once at mount time; re-mount to refresh.\n"
+    "\n"
+    "Report bugs at <https://github.com/gnu-ai/httpfs-translator/issues>.\n";
 
 int main (int argc, char *argv[])
 {
@@ -38,6 +47,12 @@ int main (int argc, char *argv[])
     size_t len = 0;
     struct doc_node *tree;
     char *err = nullptr;
+
+    /* --- The GNU base commands ----------------------------------
+       --version and --help are answered before anything is
+       mounted. */
+    if (options_handle (argc, argv, "jsonfs", usage_jsonfs))
+        return EXIT_SUCCESS;
 
     /* The first non-option argument is the source document. */
     for (int i = 1; i < argc; i++)

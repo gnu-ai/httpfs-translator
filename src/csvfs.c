@@ -35,7 +35,19 @@
 #include <string.h>
 
 #include "csv.h"
+#include "options.h"
 #include "parserfs.h"
+
+/* Program-specific usage block completed by --help; the same
+ * binary serves csvfs and tsvfs (only the default delimiter
+ * differs), so the usage covers both spellings. */
+static const char usage_csvfs[] =
+    "Mount a CSV (or TSV) document as a filesystem:\n"
+    "  settrans -a <mount point> csvfs [-d <delim>] <source file>\n"
+    "  settrans -a <mount point> tsvfs <source file>\n"
+    "The document is read once at mount time; re-mount to refresh.\n"
+    "\n"
+    "Report bugs at <https://github.com/gnu-ai/httpfs-translator/issues>.\n";
 
 int main (int argc, char *argv[])
 {
@@ -44,6 +56,13 @@ int main (int argc, char *argv[])
     size_t len = 0;
     char delim = '\0';
     bool as_tsv = false;
+
+    /* --- The GNU base commands ----------------------------------
+       --version and --help are answered before anything is
+       mounted; the answer names the spelling under which the
+       binary was invoked (csvfs by default). */
+    if (options_handle (argc, argv, "csvfs", usage_csvfs))
+        return EXIT_SUCCESS;
 
     /* --- Parse the command line ------------------------------- */
     for (int i = 1; i < argc; i++)

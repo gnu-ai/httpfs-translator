@@ -10,7 +10,9 @@ httpfs_SOURCES = \
     http.h \
     httpfs.c \
     httpfs.h \
-    netfs.c
+    netfs.c \
+    options.c \
+    options.h
 
 # --- Phase 3: the parser chain ----------------------------------------
 #
@@ -22,6 +24,8 @@ httpfs_SOURCES = \
 PARSERFS_SOURCES = \
     doc.c \
     doc.h \
+    options.c \
+    options.h \
     parserfs.c \
     parserfs.h
 

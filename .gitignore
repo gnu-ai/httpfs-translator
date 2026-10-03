@@ -77,3 +77,22 @@ test-driver
 Makefile
 Makefile.in
 .deps/
+
+# Build products and test logs
+*.log
+*.trs
+src/httpfs
+src/htmlfs
+src/jsonfs
+src/csvfs
+src/tsvfs
+tests/test_url
+tests/test_json
+tests/test_html
+tests/test_csv
+tests/test_full_stream
+tests/test_range
+tests/test_ranged_reads
+
+# Automake dir stamps
+.dirstamp

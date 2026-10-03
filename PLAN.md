@@ -20,4 +20,5 @@
 
 ## Phase 4: Evolution & Hardening
 - [ ] Controlled migration of embedded tests from `libmicrohttpd` v1 to **`libmicrohttpd` v2**, leveraging new APIs for increased I/O determinism (e.g., complex fault-injection scenarios).
+- [ ] Multi-task and multi-user operation: `httpfs` and the parser chain (`htmlfs`, `jsonfs`, `csvfs`/`tsvfs`) must serve concurrent readers and several users at once — one seek/Range cursor per open file per reader, no shared mutable state without locking, no user-serialized global state.
 - [ ] Optimize Mach IPC and minimize buffer-copy overhead (memory-to-memory I/O) between `httpfs` and upstream content translators.

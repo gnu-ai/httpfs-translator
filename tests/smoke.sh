@@ -26,7 +26,14 @@ printf 'Bonjour, monde !' > /tmp/httpfs-smoke/hello.txt
 SERVER=$!
 sleep 2
 
-mkdir -p /web
+# A previous run may have left mounted translators behind (the
+# guest filesystem persists between runs): detach them first, so
+# the test is replayable on a live system.
+for d in /web /api /table /page; do
+    settrans -D "$d" 2>/dev/null || true
+done
+
+mkdir -p /web /api /table /page
 settrans -a /web "$BINARY" "http://127.0.0.1:$PORT"
 
 [ "$(cat /web/status 2>/dev/null)" = "200" ] \
@@ -61,7 +68,7 @@ printf '<html><head><title>Smoke &amp; Test</title></head><body><h1>Hi</h1><a hr
 # The parser mount points live on the real filesystem; the SOURCE
 # paths (/web/api.json/content, ...) need no mkdir — httpfs
 # synthesizes URL directories, and the tree is read-only anyway.
-mkdir -p /api /table /page
+
 
 settrans -a /api "$SRCDIR/jsonfs" /web/api.json/content
 [ "$(cat /api/version 2>/dev/null)" = "1.2" ] \

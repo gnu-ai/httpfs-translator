@@ -26,11 +26,23 @@ printf 'Bonjour, monde !' > /tmp/httpfs-smoke/hello.txt
 SERVER=$!
 sleep 2
 
-# A previous run may have left mounted translators behind (the
-# guest filesystem persists between runs): detach them first, so
-# the test is replayable on a live system.
+# detach PATH — remove the translator of PATH, tolerating the two
+# settrans generations: newer ones dropped -D/--delete in favor of
+# -o/--orphan; older ones do not know -o.  One of them must work.
+detach() {
+    settrans -o "$1" 2>/dev/null && return 0
+    settrans -D "$1" 2>/dev/null && return 0
+    return 1
+}
+
+# A previous run may have left translators and mount points behind
+# (the guest filesystem persists between runs; a torn shutdown can
+# even leave a mount point as a repaired plain FILE).  Detach,
+# remove the node, then recreate a clean directory.
 for d in /web /api /table /page; do
-    settrans -D "$d" 2>/dev/null || true
+    detach "$d" || true
+    rm -f "$d" 2>/dev/null || true
+    rmdir "$d" 2>/dev/null || true
 done
 
 mkdir -p /web /api /table /page
@@ -77,7 +89,7 @@ settrans -a /api "$SRCDIR/jsonfs" /web/api.json/content
     || fail "jsonfs should expose the boolean member"
 [ "$(cat /api/mirrors/1 2>/dev/null)" = "b" ] \
     || fail "jsonfs should expose array entries"
-settrans -D /api
+detach /api
 
 settrans -a /table "$SRCDIR/csvfs" /web/table.csv/content
 [ "$(cat /table/count 2>/dev/null)" = "1" ] \
@@ -86,7 +98,7 @@ settrans -a /table "$SRCDIR/csvfs" /web/table.csv/content
     || fail "csvfs row view should expose the year cell"
 [ "$(cat /table/columns/name 2>/dev/null)" = "GNU" ] \
     || fail "csvfs column view should expose the name values"
-settrans -D /table
+detach /table
 
 settrans -a /page "$SRCDIR/htmlfs" /web/page.html/content
 [ "$(cat /page/title 2>/dev/null)" = "Smoke & Test" ] \
@@ -97,9 +109,9 @@ settrans -a /page "$SRCDIR/htmlfs" /web/page.html/content
 [ "$(cat /page/links/0/url 2>/dev/null)" = "/x
 " ] \
     || fail "htmlfs should expose the link target"
-settrans -D /page
+detach /page
 
-settrans -D /web
+detach /web
 kill "$SERVER" 2>/dev/null || true
 rm -rf /tmp/httpfs-smoke
 

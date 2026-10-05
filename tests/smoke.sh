@@ -103,11 +103,11 @@ detach /table
 settrans -a /page "$SRCDIR/htmlfs" /web/page.html/content
 [ "$(cat /page/title 2>/dev/null)" = "Smoke & Test" ] \
     || fail "htmlfs should decode entities in the title"
-[ "$(cat /page/headings/0 2>/dev/null)" = "1	Hi
-" ] \
+# NB: $(...) strips the trailing newline of the file content, so
+# the expected values below carry none either.
+[ "$(cat /page/headings/0 2>/dev/null)" = "1	Hi" ] \
     || fail "htmlfs should expose the heading"
-[ "$(cat /page/links/0/url 2>/dev/null)" = "/x
-" ] \
+[ "$(cat /page/links/0/url 2>/dev/null)" = "/x" ] \
     || fail "htmlfs should expose the link target"
 detach /page
 

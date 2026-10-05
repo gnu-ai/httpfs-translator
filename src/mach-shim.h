@@ -2,25 +2,27 @@
  * SPDX-FileCopyrightText: 2026 Claire Ivanenka <claire@gnu-ai.org> */
 
 /*
- * mach-shim.h — Compat with the forky/sid GNU Mach snapshot.
+ * mach-shim.h — Compat with the GNU Mach headers of the
+ * 2026-03-14 preinstalled image.
  *
- * The Debian GNU/Hurd 2026-03-14 image ships GNU Mach
- * 1.8+git20260224, whose installed mach_host.h uses
- * processor_name_array_t without any installed header defining
- * it (the MIG header generation of this snapshot drops the
- * typedef).  Every C program including <mach.h> — every
- * translator of this stack included — fails to compile on it.
+ * The image ships GNU Mach 1.8+git20260224, whose installed
+ * headers drop the processor_name_array_t typedef, so the
+ * MIG-generated mach_host.h - and with it <mach.h> itself -
+ * does not compile.  Every C program including <mach.h>, every
+ * translator of this stack included, fails to compile on it.
  *
- * Include this header BEFORE any Mach or Hurd include; it
- * provides the canonical definition (an array of
- * processor_info_t).  C tolerates the identical redefinition the
- * day the snapshot is fixed.
+ * The current ports package (2:1.8+git20260805-4) carries the
+ * typedef in <mach/mach_types.h> as
+ *     typedef mach_port_t *processor_name_array_t;
+ * Define it the SAME way here, BEFORE any Mach or Hurd
+ * include: C tolerates the identical redefinition, so this
+ * keeps compiling on fixed systems.
  */
 
 #ifndef HTTPFS_MACH_SHIM_H
 #define HTTPFS_MACH_SHIM_H
 
-#include <mach/processor_info.h>
-typedef processor_info_t *processor_name_array_t;
+#include <mach/port.h>                  /* mach_port_t */
+typedef mach_port_t *processor_name_array_t;
 
 #endif /* HTTPFS_MACH_SHIM_H */

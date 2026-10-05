@@ -28,9 +28,9 @@ sleep 2
 
 # detach PATH — remove the translator of PATH, tolerating the two
 # settrans generations: newer ones dropped -D/--delete in favor of
-# -o/--orphan; older ones do not know -o.  One of them must work.
+# -g/--goaway; older ones do not know -g.  One of them must work.
 detach() {
-    settrans -o "$1" 2>/dev/null && return 0
+    settrans -g "$1" 2>/dev/null && return 0
     settrans -D "$1" 2>/dev/null && return 0
     return 1
 }

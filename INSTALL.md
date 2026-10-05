@@ -67,7 +67,7 @@ provides the bootstrap port and the mount point.
 ```console
 $ settrans -a /web httpfs https://example.org     # active translator
 $ cat /web/content                                 # use it
-$ settrans -D /web                                # detach/stop
+$ settrans -g /web                                # detach/stop
 ```
 
 Without a base URL, or started outside `settrans`, the program exits

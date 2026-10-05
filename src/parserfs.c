@@ -42,6 +42,7 @@
 #include <dirent.h>
 #include <unistd.h>
 
+#include "mach-shim.h"
 #include <hurd.h>
 #include <hurd/iohelp.h>
 #include <hurd/netfs.h>

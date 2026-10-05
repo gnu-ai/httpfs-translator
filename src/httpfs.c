@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include "mach-shim.h"
 #include <hurd.h>
 
 #include "httpfs.h"

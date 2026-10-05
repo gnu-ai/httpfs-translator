@@ -113,7 +113,7 @@ To build out of tree: `mkdir build && cd build && ../configure && make`.
 $ make install                                # httpfs, htmlfs, jsonfs, csvfs, tsvfs
 $ settrans -a /web httpfs https://example.org  # mount the transport
 $ settrans -a /page htmlfs /web/content        # stack a parser on it
-$ settrans -D /web                             # unmount
+$ settrans -g /web                             # unmount
 ```
 
 - `-a` starts the translator actively, in the foreground; use
